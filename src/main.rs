@@ -3,7 +3,6 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use azalea::{
-    app::Plugin,
     blocks::{BlockState, BlockStates},
     prelude::*,
     world::{iterators::ChunkIterator, palette::Palette, Instance},
@@ -16,44 +15,41 @@ use futures_channel::mpsc::{unbounded, UnboundedSender};
 use futures_util::{future, pin_mut, stream::StreamExt, TryStreamExt};
 use nbt::Blob;
 use parking_lot::Mutex;
+use sqlx::{
+    postgres::{PgPoolOptions, PgRow},
+    PgPool, Pool, Postgres, Row,
+};
 use tokio::net::{TcpListener, TcpStream};
-use tokio_postgres::{Client, NoTls, Row};
 use tokio_tungstenite::tungstenite::Message;
 
 type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
 
-async fn create_chest(
-    client: &tokio_postgres::Client,
-    x: f64,
-    y: f64,
-    z: f64,
-) -> Result<(), tokio_postgres::Error> {
-    client
-        .query(
-            "INSERT INTO chests (x, y, z) VALUES ($1::float, $2::float, $3::float) ON CONFLICT (x, y, z) DO NOTHING;",
-            &[&x, &y, &z],
-        )
-        .await?;
+async fn create_chest(pool: &sqlx::PgPool, x: f64, y: f64, z: f64) -> Result<(), sqlx::Error> {
+    sqlx::query("INSERT INTO chests (x, y, z) VALUES ($1::float, $2::float, $3::float) ON CONFLICT (x, y, z) DO NOTHING;")
+        .bind(x as f64)
+        .bind(y as f64)
+        .bind(z as f64)
+        .fetch_optional(pool).await?;
     Ok(())
 }
 
 async fn items_in_chest(
-    client: &tokio_postgres::Client,
+    pool: &sqlx::PgPool,
     x: f64,
     y: f64,
     z: f64,
-) -> Result<Vec<Row>, tokio_postgres::Error> {
-    client
-        .query(
-            "SELECT * FROM get_items_from_chest ($1::float, $2::float, $3::float);",
-            &[&x, &y, &z],
-        )
+) -> Result<Vec<PgRow>, sqlx::Error> {
+    sqlx::query("SELECT * FROM get_items_from_chest ($1::float, $2::float, $3::float);")
+        .bind(x as f64)
+        .bind(y as f64)
+        .bind(z as f64)
+        .fetch_all(pool)
         .await
 }
 
 async fn set_item_in_chest(
-    client: &tokio_postgres::Client,
+    pool: &sqlx::PgPool,
     x: f64,
     y: f64,
     z: f64,
@@ -68,11 +64,15 @@ async fn set_item_in_chest(
         blob.to_writer(&mut serialized_nbt)?;
         item_nbt = Some(serialized_nbt);
     }
-    client
-        .query(
-            "CALL insert_item_into_chest ($1::float, $2::float, $3::float, $4::int, $5::text, $6::smallint, $7::bytea);",
-            &[&x, &y, &z, &location_in_chest, &item_id, &item_count, &item_nbt],
-        )
+    sqlx::query("CALL insert_item_into_chest ($1::float, $2::float, $3::float, $4::int, $5::text, $6::smallint, $7::bytea);")
+        .bind(x as f64)
+        .bind(y as f64)
+        .bind(z as f64)
+        .bind(location_in_chest)
+        .bind(item_id)
+        .bind(item_count)
+        .bind(item_nbt)
+        .fetch_optional(pool)
         .await?;
     Ok(())
 }
@@ -81,29 +81,43 @@ async fn set_item_in_chest(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
-    let (client, connection) = tokio_postgres::connect(
-        &format!(
-            "host=localhost user=postgres password={} dbname=chest_storage",
+    let pool: Pool<Postgres> = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&format!(
+            "postgres://postgres:{}@localhost/chest_storage",
             std::env::var("POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD must be set")
-        ),
-        NoTls,
-    )
-    .await?;
+        ))
+        .await?;
 
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("connection error: {}", e);
-        }
-    });
+    println!("AAA");
+    sqlx::query("DELETE FROM chest_items")
+        .fetch_optional(&pool)
+        .await?;
+    println!("BBB");
+    sqlx::query("DELETE FROM chests")
+        .fetch_optional(&pool)
+        .await?;
+    println!("CCC");
 
-    client.query("DELETE FROM chest_items", &[]).await?;
-    client.query("DELETE FROM chests", &[]).await?;
+    let res: Vec<PgRow> =
+        sqlx::query("SELECT * FROM get_items_from_chest ($1::float, $2::float, $3::float);")
+            .bind(1 as f64)
+            .bind(2 as f64)
+            .bind(3 as f64)
+            .fetch_all(&pool)
+            .await?;
+    println!(
+        "res = {:?}",
+        res.iter()
+            .map(|item| item.try_get("item_id").unwrap_or("UNKNOWN"))
+            .collect::<Vec<_>>()
+    );
 
-    create_chest(&client, 1f64, 2f64, 3f64).await?;
+    create_chest(&pool, 1f64, 2f64, 3f64).await?;
 
-    set_item_in_chest(&client, 1f64, 2f64, 3f64, 0, "minecraft:stone", 64, None).await?;
+    set_item_in_chest(&pool, 1f64, 2f64, 3f64, 0, "minecraft:stone", 64, None).await?;
     set_item_in_chest(
-        &client,
+        &pool,
         1f64,
         2f64,
         3f64,
@@ -116,7 +130,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         "items in chest: {:?}",
-        items_in_chest(&client, 1f64, 2f64, 3f64)
+        items_in_chest(&pool, 1f64, 2f64, 3f64)
             .await?
             .iter()
             .map(|item| item.try_get::<_, &str>("item_id").unwrap_or("UNKNOWN"))
@@ -125,8 +139,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!(
         "chests rows: {:?}\nchest_items rows: {:?}",
-        client.query("SELECT * FROM chests", &[]).await?,
-        client.query("SELECT * FROM chest_items", &[]).await?
+        sqlx::query("SELECT * FROM chests")
+            .fetch_all(&pool)
+            .await?
+            .iter()
+            .map(|item| item.columns())
+            .collect::<Vec<_>>(),
+        sqlx::query("SELECT * FROM chest_items")
+            .fetch_all(&pool)
+            .await?
+            .iter()
+            .map(|item| item.columns())
+            .collect::<Vec<_>>()
     );
 
     tokio::spawn(async move {
@@ -137,7 +161,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap();
 
         ClientBuilder::new()
-            .add_plugins(PostgresPlugin { client: &client })
             .set_handler(minecraft_handle)
             .start(account, "localhost:25590")
             .await
@@ -213,12 +236,13 @@ struct State {
     pub checked_chests: Arc<Mutex<Vec<BlockPos>>>,
 }
 
-async fn minecraft_handle<'a>(
+#[allow(unused)]
+async fn minecraft_handle(
     mut bot: azalea::Client,
     event: Event,
     state: State,
-    client: PostgresResource<'a>,
 ) -> anyhow::Result<()> {
+    let pool: PgPool = bot.component::<PostgresComponent>().pool;
     match event {
         Event::Chat(m) => {
             if m.username() == Some(bot.profile.name.clone()) {
@@ -246,7 +270,7 @@ async fn minecraft_handle<'a>(
                 };
 
                 create_chest(
-                    &client.client,
+                    &pool,
                     chest_block.x as f64,
                     chest_block.y as f64,
                     chest_block.z as f64,
@@ -272,10 +296,29 @@ async fn minecraft_handle<'a>(
 
             println!("Done");
         }
+        Event::Init => {
+            let pool: Pool<Postgres> = PgPoolOptions::new()
+                .max_connections(5)
+                .connect(&format!(
+                    "postgres://postgres:{}@localhost/chest_storage",
+                    std::env::var("POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD must be set")
+                ))
+                .await?;
+
+            bot.ecs
+                .lock()
+                .entity_mut(bot.entity)
+                .insert(PostgresComponent { pool });
+        }
         _ => {}
     }
 
     Ok(())
+}
+
+#[derive(Clone, Component)]
+struct PostgresComponent {
+    pool: Pool<Postgres>,
 }
 
 pub fn find_blocks(
@@ -337,21 +380,4 @@ pub fn find_blocks(
         }
     }
     res
-}
-
-#[derive(Clone, Resource)]
-struct PostgresResource<'a> {
-    pub client: &'a Client,
-}
-#[derive(Clone)]
-struct PostgresPlugin<'a> {
-    pub client: &'a Client,
-}
-
-impl Plugin for PostgresPlugin<'static> {
-    fn build(&self, app: &mut azalea::app::App) {
-        app.insert_resource(PostgresResource {
-            client: self.client,
-        });
-    }
 }

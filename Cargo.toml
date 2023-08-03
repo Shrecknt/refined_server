@@ -17,5 +17,5 @@ hematite-nbt = "0.5.2"
 parking_lot = { version = "0.12.1", features = ["deadlock_detection"] }
 thiserror = "1.0.44"
 tokio = { version = "1.29.1", features = ["full"] }
-tokio-postgres = "0.7.8"
+sqlx = { version = "0.7", features = ["runtime-tokio", "postgres"] }
 tokio-tungstenite = "0.20.0"
