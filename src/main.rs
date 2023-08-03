@@ -306,7 +306,12 @@ async fn minecraft_handle(
                 {
                     println!("Checking slot {index}: {slot:?}");
                     if let ItemSlot::Present(item) = slot {
-                        if item.kind == azalea::Item::Diamond {
+                        if item.is_empty() {
+                            bot.chat(&format!("found item: [{} x{}]", item.kind, item.count));
+                        }
+                        if item.kind == azalea::Item::Diamond
+                            || item.kind == azalea::Item::DiamondBlock
+                        {
                             println!("clicking slot ^");
                             chest.click(QuickMoveClick::Left { slot: index as u16 });
                         }
