@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::collections::LinkedList;
+use std::{collections::HashMap, sync::Arc};
 
 use azalea::container::ContainerHandle;
 use azalea::inventory::operations::QuickMoveClick;
@@ -8,7 +9,10 @@ use azalea_inventory::ItemSlot;
 use parking_lot::Mutex;
 use sqlx::PgPool;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+use tokio::net::TcpListener;
 
+use crate::handle_websockets::handle_connection0;
+use crate::{bot_handle_queue, PeerMap};
 use crate::{create_chest, find_blocks::find_blocks, set_item_in_chest};
 
 #[derive(Default, Clone, Component)]
@@ -35,6 +39,35 @@ pub async fn minecraft_handle(
                 .lock()
                 .entity_mut(bot.entity)
                 .insert(PostgresComponent { pool });
+
+            let queue = Arc::new(Mutex::new(LinkedList::new()));
+            let queue = WebsocketQueue {
+                queue: Arc::clone(&queue),
+            };
+
+            bot.ecs.lock().entity_mut(bot.entity).insert(queue.clone());
+
+            let addr = "127.0.0.1:8080".to_string();
+            let state = PeerMap::new(Mutex::new(HashMap::new()));
+            let listener = TcpListener::bind(addr)
+                .await
+                .expect("Unable to bind, is the port already in use?");
+            let queue2 = queue.clone();
+            tokio::spawn(async move {
+                let queue = queue2;
+                loop {
+                    let (stream, addr) = listener.accept().await.unwrap();
+                    tokio::spawn(handle_connection0(
+                        state.clone(),
+                        stream,
+                        addr,
+                        queue.clone(),
+                    ));
+                }
+            });
+            tokio::spawn(async move {
+                bot_handle_queue(queue.clone(), bot).await.unwrap();
+            });
             return Ok(());
         }
         _ => {}
@@ -44,6 +77,8 @@ pub async fn minecraft_handle(
 
     match event {
         Event::Chat(m) => {
+            println!("{}", m.message());
+
             if m.username() == Some(bot.profile.name.clone()) {
                 return Ok(());
             };
@@ -62,6 +97,9 @@ pub async fn minecraft_handle(
             println!("Found chests at {:?}", chest_blocks);
 
             for chest_block in chest_blocks {
+                if bot.position().distance_to(&chest_block.to_vec3_floored()) > 10.0 {
+                    continue;
+                }
                 // bot.goto(BlockPosGoal::from(chest_block));
                 let mut chest: Option<ContainerHandle> = bot.open_container(chest_block).await;
                 let mut retries = 3;
@@ -116,6 +154,7 @@ pub async fn minecraft_handle(
                 }
             }
             println!("Done");
+            bot.chat("Done");
         }
         _ => {}
     }
@@ -126,4 +165,9 @@ pub async fn minecraft_handle(
 #[derive(Clone, Component)]
 struct PostgresComponent {
     pool: Pool<Postgres>,
+}
+
+#[derive(Clone, Component)]
+pub struct WebsocketQueue {
+    pub queue: Arc<Mutex<LinkedList<String>>>,
 }

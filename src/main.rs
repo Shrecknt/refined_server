@@ -3,14 +3,12 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use azalea::prelude::*;
-use futures_channel::mpsc::{unbounded, UnboundedSender};
-use futures_util::{future, pin_mut, stream::StreamExt, TryStreamExt};
+use futures_channel::mpsc::UnboundedSender;
 use parking_lot::Mutex;
 use sqlx::{
     postgres::{PgPoolOptions, PgRow},
     Pool, Postgres, Row,
 };
-use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::Message;
 
 mod find_blocks;
@@ -20,6 +18,11 @@ use minecraft_handle::minecraft_handle;
 
 mod postgres;
 use postgres::{create_chest, items_in_chest, set_item_in_chest};
+
+mod handle_websockets;
+
+mod bot_handle_queue;
+use bot_handle_queue::bot_handle_queue;
 
 type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;
@@ -100,80 +103,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect::<Vec<_>>()
     );
 
-    tokio::spawn(async move {
-        let account: Account = Account::microsoft(
-            &std::env::var("MINECRAFT_EMAIL").expect("MINECRAFT_EMAIL must be set"),
-        )
-        .await
-        .unwrap();
-
-        ClientBuilder::new()
-            .set_handler(minecraft_handle)
-            .start(account, "localhost:25590")
+    let account: Account =
+        Account::microsoft(&std::env::var("MINECRAFT_EMAIL").expect("MINECRAFT_EMAIL must be set"))
             .await
             .unwrap();
-    });
 
-    let addr = "127.0.0.1:8080".to_string();
-    let state = PeerMap::new(Mutex::new(HashMap::new()));
-    let listener = TcpListener::bind(addr)
+    ClientBuilder::new()
+        .set_handler(minecraft_handle)
+        .start(account, "localhost:25590")
         .await
-        .expect("Unable to bind, is the port already in use?");
-    loop {
-        let (stream, addr) = listener.accept().await?;
-        tokio::spawn(handle_connection0(state.clone(), stream, addr));
-    }
-}
-
-async fn handle_connection0(peer_map: PeerMap, stream: TcpStream, addr: SocketAddr) {
-    handle_connection(peer_map, stream, addr).await.unwrap();
-}
-
-async fn handle_connection(
-    peer_map: PeerMap,
-    stream: TcpStream,
-    addr: SocketAddr,
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Incoming TCP connection from: {}", addr);
-
-    let ws_stream = tokio_tungstenite::accept_async(stream)
-        .await
-        .expect("Error during the websocket handshake occurred");
-    println!("WebSocket connection established: {}", addr);
-
-    let (tx, rx) = unbounded();
-    peer_map.lock().insert(addr, tx);
-
-    let (outgoing, incoming) = ws_stream.split();
-
-    let broadcast_incoming = incoming.try_for_each(|msg| {
-        println!(
-            "Received a message from {}: {}",
-            addr,
-            msg.to_text().unwrap()
-        );
-        let peers = peer_map.lock();
-
-        // We want to broadcast the message to everyone except ourselves.
-        let broadcast_recipients = peers
-            .iter()
-            .filter(|(peer_addr, _)| peer_addr != &&addr)
-            .map(|(_, ws_sink)| ws_sink);
-
-        for recp in broadcast_recipients {
-            recp.unbounded_send(msg.clone()).unwrap();
-        }
-
-        future::ok(())
-    });
-
-    let receive_from_others = rx.map(Ok).forward(outgoing);
-
-    pin_mut!(broadcast_incoming, receive_from_others);
-    future::select(broadcast_incoming, receive_from_others).await;
-
-    println!("{} disconnected", &addr);
-    peer_map.lock().remove(&addr);
+        .unwrap();
 
     Ok(())
 }
