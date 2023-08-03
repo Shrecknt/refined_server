@@ -242,7 +242,27 @@ async fn minecraft_handle(
     event: Event,
     state: State,
 ) -> anyhow::Result<()> {
+    match event {
+        Event::Init => {
+            let pool: Pool<Postgres> = PgPoolOptions::new()
+                .max_connections(5)
+                .connect(&format!(
+                    "postgres://postgres:{}@localhost/chest_storage",
+                    std::env::var("POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD must be set")
+                ))
+                .await?;
+
+            bot.ecs
+                .lock()
+                .entity_mut(bot.entity)
+                .insert(PostgresComponent { pool });
+            return Ok(());
+        }
+        _ => {}
+    };
+
     let pool: PgPool = bot.component::<PostgresComponent>().pool;
+
     match event {
         Event::Chat(m) => {
             if m.username() == Some(bot.profile.name.clone()) {
@@ -295,20 +315,6 @@ async fn minecraft_handle(
             }
 
             println!("Done");
-        }
-        Event::Init => {
-            let pool: Pool<Postgres> = PgPoolOptions::new()
-                .max_connections(5)
-                .connect(&format!(
-                    "postgres://postgres:{}@localhost/chest_storage",
-                    std::env::var("POSTGRES_PASSWORD").expect("POSTGRES_PASSWORD must be set")
-                ))
-                .await?;
-
-            bot.ecs
-                .lock()
-                .entity_mut(bot.entity)
-                .insert(PostgresComponent { pool });
         }
         _ => {}
     }
