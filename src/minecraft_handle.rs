@@ -74,6 +74,7 @@ pub async fn minecraft_handle(
     };
 
     let pool: PgPool = bot.component::<PostgresComponent>().pool;
+    let queue: Arc<Mutex<LinkedList<String>>> = bot.component::<WebsocketQueue>().queue;
 
     match event {
         Event::Chat(m) => {
@@ -82,9 +83,22 @@ pub async fn minecraft_handle(
             if m.username() == Some(bot.profile.name.clone()) {
                 return Ok(());
             };
+
+            if m.username()
+                == Some(std::env::var("OWNER_USERNAME").expect("OWNER_USERNAME must be set"))
+            {
+                if m.content().starts_with("$") {
+                    let content = m.content();
+                    let mut command = content.chars();
+                    command.next();
+                    queue.lock().push_back(command.as_str().to_string());
+                }
+            }
+
             if m.content() != "go" {
                 return Ok(());
             }
+
             {
                 state.checked_chests.lock().clear();
             }

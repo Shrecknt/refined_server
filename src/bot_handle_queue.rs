@@ -15,11 +15,17 @@ pub async fn bot_handle_queue(
                 continue;
             }
         };
+        let command = command.as_str();
 
         println!("Recieved command: {}", command);
 
-        if command == "sayhi" {
-            bot.chat("hi");
-        }
+        match command {
+            "sayhi" => {
+                bot.chat("hi");
+            }
+            _ => {
+                bot.chat("unknown command");
+            }
+        };
     }
 }
