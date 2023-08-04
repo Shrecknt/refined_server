@@ -14,7 +14,6 @@ use tokio_tungstenite::tungstenite::Message;
 mod find_blocks;
 
 mod minecraft_handle;
-use minecraft_handle::minecraft_handle;
 
 mod postgres;
 use postgres::{create_chest, items_in_chest, set_item_in_chest};
@@ -109,7 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap();
 
     ClientBuilder::new()
-        .set_handler(minecraft_handle)
+        .set_handler(minecraft_handle::minecraft_handle)
         .start(account, "localhost:25590")
         .await
         .unwrap();

@@ -7,6 +7,7 @@ use azalea::prelude::*;
 use azalea::BlockPos;
 use azalea_inventory::ItemSlot;
 use parking_lot::Mutex;
+use serde::Deserialize;
 use sqlx::PgPool;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use tokio::net::TcpListener;
@@ -20,6 +21,22 @@ pub struct State {
     pub checked_chests: Arc<Mutex<Vec<BlockPos>>>,
 }
 
+#[derive(Deserialize, Debug, Clone, Component)]
+pub struct Config {
+    pub bot_owner: String,
+    pub region: Region,
+}
+#[derive(Deserialize, Debug, Clone)]
+pub struct Region {
+    pub walking_level: i32,
+    pub x1: i32,
+    pub z1: i32,
+    pub x2: i32,
+    pub z2: i32,
+    pub min_y: i32,
+    pub max_y: i32,
+}
+
 pub async fn minecraft_handle(
     mut bot: azalea::Client,
     event: Event,
@@ -27,6 +44,11 @@ pub async fn minecraft_handle(
 ) -> anyhow::Result<()> {
     match event {
         Event::Init => {
+            let config: Config =
+                toml::from_str(&tokio::fs::read_to_string("config.toml").await.unwrap()).unwrap();
+            println!("Loaded config: {config:?}");
+            bot.ecs.lock().entity_mut(bot.entity).insert(config.clone());
+
             let pool: Pool<Postgres> = PgPoolOptions::new()
                 .max_connections(5)
                 .connect(&format!(
@@ -38,7 +60,7 @@ pub async fn minecraft_handle(
             bot.ecs
                 .lock()
                 .entity_mut(bot.entity)
-                .insert(PostgresComponent { pool });
+                .insert(PostgresComponent { pool: pool.clone() });
 
             let queue = Arc::new(Mutex::new(LinkedList::new()));
             let queue = WebsocketQueue {
@@ -66,15 +88,22 @@ pub async fn minecraft_handle(
                 }
             });
             tokio::spawn(async move {
-                bot_handle_queue(queue.clone(), bot).await.unwrap();
+                bot_handle_queue(queue.clone(), bot, config, pool)
+                    .await
+                    .unwrap();
             });
             return Ok(());
         }
         _ => {}
     };
 
+    // println!("AAA");
     let pool: PgPool = bot.component::<PostgresComponent>().pool;
+    // println!("BBB");
     let queue: Arc<Mutex<LinkedList<String>>> = bot.component::<WebsocketQueue>().queue;
+    // println!("CCC");
+    // let config: Config = bot.component::<Config>();
+    // println!("DDD");
 
     match event {
         Event::Chat(m) => {
@@ -84,9 +113,7 @@ pub async fn minecraft_handle(
                 return Ok(());
             };
 
-            if m.username()
-                == Some(std::env::var("OWNER_USERNAME").expect("OWNER_USERNAME must be set"))
-            {
+            if m.username() == Some(/*config.bot_owner*/ "Shrecknt".to_string()) {
                 if m.content().starts_with("$") {
                     let content = m.content();
                     let mut command = content.chars();

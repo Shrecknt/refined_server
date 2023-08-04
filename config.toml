@@ -1,0 +1,10 @@
+bot_owner = "Shrecknt"
+
+[region]
+walking_level = 124
+x1 = -26
+z1 = -22
+x2 = -22
+z2 = -18
+min_y = 122
+max_y = 126
