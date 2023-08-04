@@ -26,8 +26,6 @@ CREATE TABLE chest_items (
 	UNIQUE (x, y, z, location_in_chest)
 );
 
-INSERT INTO chests (x, y, z) VALUES (0, 0, 0) ON CONFLICT (x, y, z) DO NOTHING;
-
 DROP FUNCTION IF EXISTS insert_item_into_chest;
 CREATE OR REPLACE PROCEDURE insert_item_into_chest (
 	_x float,
@@ -73,39 +71,22 @@ CREATE OR REPLACE FUNCTION get_items_from_chest(
 	END;
 $$ LANGUAGE plpgsql;
 
-CALL insert_item_into_chest (0::float, 0::float, 0::float, 2::int, 'minecraft:gravel'::text, 32::smallint, ''::bytea);
-
-INSERT INTO chest_items (x, y, z, location_in_chest, item_id, item_count, item_nbt)
-	VALUES (0, 0, 0, 0, 'minecraft:stone', 64, ''::bytea)
-	ON CONFLICT (x, y, z, location_in_chest)
-	DO UPDATE SET
-		item_id = excluded.item_id,
-		item_count = excluded.item_count,
-		item_nbt = excluded.item_nbt;
-		
-INSERT INTO chest_items (x, y, z, location_in_chest, item_id, item_count, item_nbt)
-	VALUES (0, 0, 0, 0, 'minecraft:diamond_block', 64, ''::bytea)
-	ON CONFLICT (x, y, z, location_in_chest)
-	DO UPDATE SET
-		item_id = excluded.item_id,
-		item_count = excluded.item_count,
-		item_nbt = excluded.item_nbt;
-		
-INSERT INTO chest_items (x, y, z, location_in_chest, item_id, item_count, item_nbt)
-	VALUES (0, 0, 0, 1, 'minecraft:grass_block', 64, ''::bytea)
-	ON CONFLICT (x, y, z, location_in_chest)
-	DO UPDATE SET
-		item_id = excluded.item_id,
-		item_count = excluded.item_count,
-		item_nbt = excluded.item_nbt;
-
-SELECT * FROM chests;
-SELECT * FROM chest_items;
-
-SELECT chest_items.* FROM chest_items JOIN chests
-	ON (chest_items.x = chests.x AND
-		chest_items.y = chests.y AND
-		chest_items.z = chests.z)
-	WHERE chests.x = 0 AND chests.y = 0 AND chests.z = 0;
-	
-SELECT * FROM get_items_from_chest(0::float, 0::float, 0::float);
+DROP FUNCTION IF EXISTS find_item;
+CREATE OR REPLACE FUNCTION find_item(
+	_item_id TEXT
+) RETURNS TABLE (
+	x FLOAT,
+	y FLOAT,
+	z FLOAT,
+	item_count SMALLINT,
+	location_in_chest INT
+) as $$
+	BEGIN
+		RETURN QUERY SELECT chests.*, chest_items.item_count, chest_items.location_in_chest
+			FROM chests
+			JOIN chest_items ON chest_items.item_id = _item_id
+				AND chest_items.x = chests.x
+				AND chest_items.y = chests.y
+				AND chest_items.z = chests.z;
+	END;
+$$ LANGUAGE plpgsql;

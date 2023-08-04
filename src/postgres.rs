@@ -52,3 +52,10 @@ pub async fn create_chest(pool: &sqlx::PgPool, x: f64, y: f64, z: f64) -> Result
         .fetch_optional(pool).await?;
     Ok(())
 }
+
+pub async fn find_item(pool: &sqlx::PgPool, item_id: &str) -> Result<Vec<PgRow>, sqlx::Error> {
+    sqlx::query("SELECT * FROM find_item($1::text);")
+        .bind(item_id)
+        .fetch_all(pool)
+        .await
+}

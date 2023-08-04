@@ -12,9 +12,10 @@ use sqlx::PgPool;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use tokio::net::TcpListener;
 
+use crate::find_blocks::find_blocks;
 use crate::handle_websockets::handle_connection0;
+use crate::postgres::{create_chest, set_item_in_chest};
 use crate::{bot_handle_queue, PeerMap};
-use crate::{create_chest, find_blocks::find_blocks, set_item_in_chest};
 
 #[derive(Default, Clone, Component)]
 pub struct State {
@@ -88,7 +89,7 @@ pub async fn minecraft_handle(
                 }
             });
             tokio::spawn(async move {
-                bot_handle_queue(queue.clone(), bot, config, pool)
+                bot_handle_queue::bot_handle_queue(queue.clone(), bot, config, pool)
                     .await
                     .unwrap();
             });
