@@ -1,15 +1,18 @@
 use std::time::Duration;
 
+use azalea::container::ContainerHandle;
 use azalea::entity::Position;
 use azalea::protocol::packets::game::ServerboundGamePacket;
 use azalea::{
     prelude::ContainerClientExt,
     protocol::packets::game::serverbound_move_player_pos_packet::ServerboundMovePlayerPosPacket,
 };
+use azalea_core::BlockPos;
 use azalea_inventory::operations::QuickMoveClick;
 use azalea_inventory::ItemSlot;
 use sqlx::{PgPool, Row};
 
+use crate::minecraft_handle::Depot;
 use crate::{
     find_blocks::find_blocks,
     minecraft_handle::{Config, Region, WebsocketQueue},
@@ -38,8 +41,9 @@ pub async fn bot_handle_queue0(
     pool: PgPool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let region: Region = config.region;
+    let depot: Depot = config.depot;
 
-    loop {
+    'queue: loop {
         let command = queue.queue.lock().pop_front();
         let command = match command {
             Some(command) => command,
@@ -91,7 +95,6 @@ pub async fn bot_handle_queue0(
                             on_ground: true,
                         },
                     ));
-
                     {
                         let mut ecs = bot.ecs.lock();
                         let mut entity_mut = ecs.entity_mut(bot.entity);
@@ -192,15 +195,20 @@ pub async fn bot_handle_queue0(
                 if res.len() == 0 {
                     bot.chat("No items found at location");
                 }
+                let mut non_air_items = 0;
                 for item in res {
                     let item_id: &str = item.get("item_id");
                     if item_id != "minecraft:air" {
+                        non_air_items += 1;
                         bot.chat(&format!(
                             "{} x{}",
                             item_id,
                             item.get::<i16, _>("item_count")
                         ));
                     }
+                }
+                if non_air_items == 0 {
+                    bot.chat("No items in storage block");
                 }
             }
             "find" => {
@@ -217,9 +225,184 @@ pub async fn bot_handle_queue0(
                     ));
                 }
             }
+            "withdraw" => {
+                let withdraw_item_id = command_arr[1];
+
+                let res = find_item(&pool, withdraw_item_id).await?;
+                for location in res {
+                    let item_count = location.get::<i16, _>("item_count");
+                    let x = location.get::<f64, _>("x");
+                    let y = location.get::<f64, _>("y");
+                    let z = location.get::<f64, _>("z");
+                    bot.chat(&format!(
+                        "Found {}x of {} at ({}, {}, {})",
+                        item_count, withdraw_item_id, x, y, z
+                    ));
+                    teleport_to(&bot, x as i32, region.walking_level, z as i32);
+                    let blockpos = BlockPos {
+                        x: x as i32,
+                        y: y as i32,
+                        z: z as i32,
+                    };
+                    let barrel = match get_storage_handle(bot, blockpos).await {
+                        Some(barrel) => barrel,
+                        None => {
+                            println!("failed to open storage block at [{:?}] for an unknown reason (this is probably my fault)", blockpos);
+                            continue 'queue;
+                        }
+                    };
+                    let contents = match barrel.contents() {
+                        Some(contents) => contents,
+                        None => {
+                            println!("Failed to get contents of chest at [{:?}]", blockpos);
+                            continue 'queue;
+                        }
+                    };
+                    create_chest(&pool, x, y, z).await.unwrap();
+                    for (index, slot) in contents.iter().enumerate() {
+                        println!("Checking slot {index}: {slot:?}");
+                        if let ItemSlot::Present(item) = slot {
+                            bot.chat(&format!("found item: [{} x{}]", item.kind, item.count));
+
+                            println!("clicking slot ^");
+                            barrel.click(QuickMoveClick::Left { slot: index as u16 });
+                        }
+
+                        set_item_in_chest(
+                            &pool,
+                            x,
+                            y,
+                            z,
+                            index.try_into().unwrap_or(-1),
+                            &azalea::Item::Air.to_string(),
+                            0 as i16,
+                            None,
+                        )
+                        .await
+                        .unwrap();
+                    }
+                }
+
+                teleport_to(&bot, depot.x, depot.y, depot.z);
+                let blockpos = BlockPos {
+                    x: depot.storage_x,
+                    y: depot.storage_y,
+                    z: depot.storage_z,
+                };
+                let barrel = match get_storage_handle(bot, blockpos).await {
+                    Some(barrel) => barrel,
+                    None => {
+                        println!("failed to open storage block at [{:?}] for an unknown reason (this is probably my fault)", blockpos);
+                        continue 'queue;
+                    }
+                };
+                let contents = match barrel.contents() {
+                    Some(contents) => contents,
+                    None => {
+                        println!("Failed to get contents of chest at [{:?}]", blockpos);
+                        continue 'queue;
+                    }
+                };
+                println!("contents = {:?}", contents);
+                barrel.click(QuickMoveClick::Left { slot: 0 });
+            }
+            "deposit" => {
+                teleport_to(&bot, depot.x, depot.y, depot.z);
+                let blockpos = BlockPos {
+                    x: depot.storage_x,
+                    y: depot.storage_y,
+                    z: depot.storage_z,
+                };
+                let barrel = match get_storage_handle(bot, blockpos).await {
+                    Some(barrel) => barrel,
+                    None => {
+                        println!("failed to open storage block at [{:?}] for an unknown reason (this is probably my fault)", blockpos);
+                        continue 'queue;
+                    }
+                };
+                let contents = match barrel.contents() {
+                    Some(contents) => contents,
+                    None => {
+                        println!("Failed to get contents of chest at [{:?}]", blockpos);
+                        continue 'queue;
+                    }
+                };
+
+                create_chest(
+                    &pool,
+                    blockpos.x as f64,
+                    blockpos.y as f64,
+                    blockpos.z as f64,
+                )
+                .await
+                .unwrap();
+                for (index, slot) in contents.iter().enumerate() {
+                    println!("Checking slot {index}: {slot:?}");
+                    if let ItemSlot::Present(item) = slot {
+                        bot.chat(&format!("found item: [{} x{}]", item.kind, item.count));
+
+                        println!("clicking slot ^");
+                        barrel.click(QuickMoveClick::Left { slot: index as u16 });
+                    }
+
+                    set_item_in_chest(
+                        &pool,
+                        blockpos.x as f64,
+                        blockpos.y as f64,
+                        blockpos.z as f64,
+                        index.try_into().unwrap_or(-1),
+                        &azalea::Item::Air.to_string(),
+                        0 as i16,
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                }
+            }
             _ => {
                 bot.chat("unknown command");
             }
         };
     }
+}
+
+pub fn teleport_to(bot: &azalea::Client, x: i32, y: i32, z: i32) {
+    bot.write_packet(ServerboundGamePacket::MovePlayerPos(
+        ServerboundMovePlayerPosPacket {
+            x: x as f64 + 0.5,
+            y: y as f64,
+            z: z as f64 + 0.5,
+            on_ground: true,
+        },
+    ));
+    {
+        let mut ecs = bot.ecs.lock();
+        let mut entity_mut = ecs.entity_mut(bot.entity);
+        let mut position = entity_mut.get_mut::<Position>().unwrap();
+        position.x = x as f64 + 0.5;
+        position.y = y as f64;
+        position.z = z as f64 + 0.5;
+    }
+}
+
+pub async fn get_storage_handle(
+    bot: &mut azalea::Client,
+    blockpos: BlockPos,
+) -> Option<ContainerHandle> {
+    let mut barrel = bot.open_container(blockpos).await;
+    let mut retries = 5;
+    while barrel.is_none() && retries > 0 {
+        bot.chat("retrying");
+        retries -= 1;
+        barrel = bot.open_container(blockpos).await;
+        match barrel {
+            Some(_) => {
+                bot.chat("retry successful");
+            }
+            None => {
+                bot.chat(&format!("retry failed, {} attempt(s) remaining", retries));
+            }
+        }
+    }
+    barrel
 }

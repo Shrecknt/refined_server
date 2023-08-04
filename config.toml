@@ -8,3 +8,11 @@ x2 = -22
 z2 = -18
 min_y = 120
 max_y = 128
+
+[depot]
+storage_x = -21
+storage_y = 124
+storage_z = -17
+x = -22
+y = 124
+z = -18

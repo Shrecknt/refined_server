@@ -26,6 +26,7 @@ pub struct State {
 pub struct Config {
     pub bot_owner: String,
     pub region: Region,
+    pub depot: Depot,
 }
 #[derive(Deserialize, Debug, Clone)]
 pub struct Region {
@@ -36,6 +37,15 @@ pub struct Region {
     pub z2: i32,
     pub min_y: i32,
     pub max_y: i32,
+}
+#[derive(Deserialize, Debug, Clone)]
+pub struct Depot {
+    pub storage_x: i32,
+    pub storage_y: i32,
+    pub storage_z: i32,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
 }
 
 pub async fn minecraft_handle(
