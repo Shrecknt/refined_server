@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use azalea::container::ContainerHandle;
+use azalea::entity::Position;
 use azalea::protocol::packets::game::ServerboundGamePacket;
 use azalea::{
     prelude::ContainerClientExt,
@@ -19,6 +19,21 @@ use crate::{
 pub async fn bot_handle_queue(
     queue: WebsocketQueue,
     mut bot: azalea::Client,
+    config: Config,
+    pool: PgPool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match bot_handle_queue0(queue, &mut bot, config, pool).await {
+        Err(err) => {
+            bot.chat("The queue thread died, check logs");
+            println!("Error: {}", err);
+        }
+        Ok(()) => unreachable!(),
+    };
+    Ok(())
+}
+pub async fn bot_handle_queue0(
+    queue: WebsocketQueue,
+    bot: &mut azalea::Client,
     config: Config,
     pool: PgPool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -67,28 +82,49 @@ pub async fn bot_handle_queue(
                 // }
                 bot.chat(&format!("Indexing {} storage blocks", storage_blocks.len()));
                 for block in storage_blocks {
-                    let barrel: ContainerHandle = match bot.open_container(block).await {
-                        Some(barrel) => barrel,
-                        None => continue,
-                    };
-
                     bot.write_packet(ServerboundGamePacket::MovePlayerPos(
                         ServerboundMovePlayerPosPacket {
-                            x: block.x as f64,
+                            x: block.x as f64 + 0.5,
                             y: region.walking_level as f64,
-                            z: block.z as f64,
+                            z: block.z as f64 + 0.5,
                             on_ground: true,
                         },
                     ));
 
+                    {
+                        let mut ecs = bot.ecs.lock();
+                        let mut entity_mut = ecs.entity_mut(bot.entity);
+                        let mut position = entity_mut.get_mut::<Position>().unwrap();
+                        position.x = block.x as f64 + 0.5;
+                        position.z = block.z as f64 + 0.5;
+                    }
+
+                    let mut barrel = bot.open_container(block).await;
+                    let mut retries = 5;
+                    while barrel.is_none() && retries > 0 {
+                        bot.chat("retrying");
+                        retries -= 1;
+                        barrel = bot.open_container(block).await;
+                        if barrel.is_some() {
+                            bot.chat("retry successful");
+                        } else {
+                            bot.chat(&format!("retry failed, {} attempt(s) remaining", retries));
+                        }
+                    }
+                    let barrel = match barrel {
+                        Some(barrel) => barrel,
+                        None => return Err("Unable to open storage block".into()),
+                    };
+
                     create_chest(&pool, block.x as f64, block.y as f64, block.z as f64).await?;
 
                     println!("Getting contents");
-                    for (index, slot) in barrel
-                        .contents()
-                        .expect("we just opened the chest")
-                        .iter()
-                        .enumerate()
+                    for (index, slot) in match barrel.contents() {
+                        Some(contents) => contents,
+                        None => return Err("Unable to get contents of chest".into()),
+                    }
+                    .iter()
+                    .enumerate()
                     {
                         set_item_in_chest(
                             &pool,
@@ -116,7 +152,9 @@ pub async fn bot_handle_queue(
                         }
                     }
 
-                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    drop(barrel);
+                    bot.run_schedule_sender.send(())?;
+                    // tokio::time::sleep(Duration::from_millis(100)).await;
                 }
 
                 bot.chat("Done!");
