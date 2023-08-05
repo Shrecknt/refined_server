@@ -226,7 +226,10 @@ pub async fn bot_handle_queue0(
                 }
             }
             "withdraw" => {
-                let withdraw_item_id = command_arr[1];
+                let withdraw_item_id = match command_arr.get(1) {
+                    Some(id) => *id,
+                    None => "0",
+                };
 
                 let res = find_item(&pool, withdraw_item_id).await?;
                 for location in res {
@@ -296,15 +299,10 @@ pub async fn bot_handle_queue0(
                         continue 'queue;
                     }
                 };
-                let contents = match barrel.contents() {
-                    Some(contents) => contents,
-                    None => {
-                        println!("Failed to get contents of chest at [{:?}]", blockpos);
-                        continue 'queue;
-                    }
-                };
-                println!("contents = {:?}", contents);
-                barrel.click(QuickMoveClick::Left { slot: 0 });
+                let player_slots = barrel.menu().unwrap().player_slots_range();
+                for slot in player_slots {
+                    barrel.click(QuickMoveClick::Left { slot: slot as u16 });
+                }
             }
             "deposit" => {
                 teleport_to(&bot, depot.x, depot.y, depot.z);
@@ -327,37 +325,6 @@ pub async fn bot_handle_queue0(
                         continue 'queue;
                     }
                 };
-
-                create_chest(
-                    &pool,
-                    blockpos.x as f64,
-                    blockpos.y as f64,
-                    blockpos.z as f64,
-                )
-                .await
-                .unwrap();
-                for (index, slot) in contents.iter().enumerate() {
-                    println!("Checking slot {index}: {slot:?}");
-                    if let ItemSlot::Present(item) = slot {
-                        bot.chat(&format!("found item: [{} x{}]", item.kind, item.count));
-
-                        println!("clicking slot ^");
-                        barrel.click(QuickMoveClick::Left { slot: index as u16 });
-                    }
-
-                    set_item_in_chest(
-                        &pool,
-                        blockpos.x as f64,
-                        blockpos.y as f64,
-                        blockpos.z as f64,
-                        index.try_into().unwrap_or(-1),
-                        &azalea::Item::Air.to_string(),
-                        0 as i16,
-                        None,
-                    )
-                    .await
-                    .unwrap();
-                }
             }
             _ => {
                 bot.chat("unknown command");
