@@ -12,10 +12,10 @@ use azalea_inventory::operations::QuickMoveClick;
 use azalea_inventory::ItemSlot;
 use sqlx::{PgPool, Row};
 
-use crate::minecraft_handle::Depot;
 use crate::{
+    config::{Config, Depot, Region},
     find_blocks::find_blocks,
-    minecraft_handle::{Config, Region, WebsocketQueue},
+    minecraft_handle::WebsocketQueue,
     postgres::{create_chest, find_item, items_in_chest, set_item_in_chest},
 };
 

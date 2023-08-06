@@ -7,11 +7,12 @@ use futures_channel::mpsc::UnboundedSender;
 use parking_lot::{deadlock, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 
+mod bot_handle_queue;
+mod config;
 mod find_blocks;
+mod handle_websockets;
 mod minecraft_handle;
 mod postgres;
-mod handle_websockets;
-mod bot_handle_queue;
 
 type Tx = UnboundedSender<Message>;
 type PeerMap = Arc<Mutex<HashMap<SocketAddr, Tx>>>;

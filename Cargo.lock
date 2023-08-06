@@ -2128,6 +2128,7 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "hematite-nbt",
+ "lazy_static",
  "parking_lot",
  "serde",
  "sqlx",

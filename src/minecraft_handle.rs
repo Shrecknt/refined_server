@@ -7,7 +7,6 @@ use azalea::prelude::*;
 use azalea::BlockPos;
 use azalea_inventory::ItemSlot;
 use parking_lot::Mutex;
-use serde::Deserialize;
 use sqlx::PgPool;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use tokio::net::TcpListener;
@@ -22,32 +21,6 @@ pub struct State {
     pub checked_chests: Arc<Mutex<Vec<BlockPos>>>,
 }
 
-#[derive(Deserialize, Debug, Clone, Component)]
-pub struct Config {
-    pub bot_owner: String,
-    pub region: Region,
-    pub depot: Depot,
-}
-#[derive(Deserialize, Debug, Clone)]
-pub struct Region {
-    pub walking_level: i32,
-    pub x1: i32,
-    pub z1: i32,
-    pub x2: i32,
-    pub z2: i32,
-    pub min_y: i32,
-    pub max_y: i32,
-}
-#[derive(Deserialize, Debug, Clone)]
-pub struct Depot {
-    pub storage_x: i32,
-    pub storage_y: i32,
-    pub storage_z: i32,
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
 pub async fn minecraft_handle(
     mut bot: azalea::Client,
     event: Event,
@@ -55,9 +28,7 @@ pub async fn minecraft_handle(
 ) -> anyhow::Result<()> {
     match event {
         Event::Init => {
-            let config: Config =
-                toml::from_str(&tokio::fs::read_to_string("config.toml").await.unwrap()).unwrap();
-            println!("Loaded config: {config:?}");
+            let config = crate::config::CONFIG.clone();
             bot.ecs.lock().entity_mut(bot.entity).insert(config.clone());
 
             let pool: Pool<Postgres> = PgPoolOptions::new()
