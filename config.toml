@@ -1,5 +1,9 @@
 bot_owner = "Shrecknt"
 
+[connections]
+remote_host = "localhost:25590"
+websocket_host = "0.0.0.0:42069"
+
 [region]
 walking_level = 124
 x1 = -29

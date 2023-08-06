@@ -5,9 +5,17 @@ use serde::Deserialize;
 #[derive(Deserialize, Debug, Clone, Component)]
 pub struct Config {
     pub bot_owner: String,
+    pub connections: Connections,
     pub region: Region,
     pub depot: Depot,
 }
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct Connections {
+    pub remote_host: String,
+    pub websocket_host: String,
+}
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct Region {
     pub walking_level: i32,
@@ -18,6 +26,7 @@ pub struct Region {
     pub min_y: i32,
     pub max_y: i32,
 }
+
 #[derive(Deserialize, Debug, Clone)]
 pub struct Depot {
     pub storage_x: i32,

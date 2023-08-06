@@ -3,6 +3,7 @@
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, thread, time::Duration};
 
 use azalea::prelude::*;
+use config::CONFIG;
 use futures_channel::mpsc::UnboundedSender;
 use parking_lot::{deadlock, Mutex};
 use tokio_tungstenite::tungstenite::Message;
@@ -45,7 +46,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     ClientBuilder::new()
         .set_handler(minecraft_handle::minecraft_handle)
-        .start(account, "localhost:25590")
+        .start(account, CONFIG.connections.remote_host.as_str())
         .await
         .unwrap();
 

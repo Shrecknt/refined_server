@@ -13,7 +13,7 @@ use azalea_inventory::ItemSlot;
 use sqlx::{PgPool, Row};
 
 use crate::{
-    config::{Config, Depot, Region},
+    config::{Config, Depot, Region, CONFIG},
     find_blocks::find_blocks,
     minecraft_handle::WebsocketQueue,
     postgres::{create_chest, find_item, items_in_chest, set_item_in_chest},
@@ -22,10 +22,9 @@ use crate::{
 pub async fn bot_handle_queue(
     queue: WebsocketQueue,
     mut bot: azalea::Client,
-    config: Config,
     pool: PgPool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match bot_handle_queue0(queue, &mut bot, config, pool).await {
+    match bot_handle_queue0(queue, &mut bot, pool).await {
         Err(err) => {
             bot.chat("The queue thread died, check logs");
             println!("Error: {}", err);
@@ -37,9 +36,9 @@ pub async fn bot_handle_queue(
 pub async fn bot_handle_queue0(
     queue: WebsocketQueue,
     bot: &mut azalea::Client,
-    config: Config,
     pool: PgPool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let config: Config = CONFIG.clone();
     let region: Region = config.region;
     let depot: Depot = config.depot;
 
