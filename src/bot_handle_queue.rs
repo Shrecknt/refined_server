@@ -21,17 +21,25 @@ use crate::{
 
 pub async fn bot_handle_queue(
     queue: WebsocketQueue,
-    mut bot: azalea::Client,
+    bot: azalea::Client,
     pool: PgPool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    match bot_handle_queue0(queue, &mut bot, pool).await {
-        Err(err) => {
-            bot.chat("The queue thread died, check logs");
-            println!("Error: {}", err);
-        }
-        Ok(()) => unreachable!(),
-    };
-    Ok(())
+    loop {
+        let queue2 = queue.clone();
+        let mut bot2 = bot.clone();
+        let pool2 = pool.clone();
+        match tokio::spawn(
+            async move { bot_handle_queue0(queue2, &mut bot2, pool2).await.unwrap() },
+        )
+        .await
+        {
+            Err(err) => {
+                bot.chat("The queue thread died, check logs");
+                println!("Error: {}", err);
+            }
+            Ok(()) => unreachable!(),
+        };
+    }
 }
 pub async fn bot_handle_queue0(
     queue: WebsocketQueue,
@@ -324,6 +332,13 @@ pub async fn bot_handle_queue0(
                         continue 'queue;
                     }
                 };
+                for (index, slot) in contents.iter().enumerate() {
+                    println!("Checking slot {index}: {slot:?}");
+                    if let ItemSlot::Present(item) = slot {
+                        bot.chat(&format!("found item: [{} x{}]", item.kind, item.count));
+                        barrel.click(QuickMoveClick::Left { slot: index as u16 });
+                    }
+                }
             }
             _ => {
                 bot.chat("unknown command");

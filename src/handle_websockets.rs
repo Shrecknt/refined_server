@@ -36,27 +36,17 @@ pub async fn handle_connection(
     let (outgoing, incoming) = ws_stream.split();
 
     let broadcast_incoming = incoming.try_for_each(|msg| {
-        println!(
-            "Received a message from {}: {}",
-            addr,
-            msg.to_text().unwrap()
-        );
+        let text = msg.to_text().unwrap();
+
+        if text == "PING" || text == "" {
+            return future::ok(());
+        }
+
+        println!("Received a message from {}: {}", addr, text);
         queue
             .queue
             .lock()
             .push_back(msg.to_text().unwrap_or("BAD_MESSAGE").to_string());
-
-        let peers = peer_map.lock();
-
-        // We want to broadcast the message to everyone except ourselves.
-        let broadcast_recipients = peers
-            .iter()
-            .filter(|(peer_addr, _)| peer_addr != &&addr)
-            .map(|(_, ws_sink)| ws_sink);
-
-        for recp in broadcast_recipients {
-            recp.unbounded_send(msg.clone()).unwrap();
-        }
 
         future::ok(())
     });
